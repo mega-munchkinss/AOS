@@ -11,6 +11,7 @@
 #include <pwd.h>
 #include <time.h>
 #include <vector>
+#include <stack>
 #include <list>
 #include <algorithm>
 #include <stdio.h>
@@ -23,6 +24,22 @@
 #include <sstream>
 #include <fstream>
 using namespace std;
+
+enum KEYS
+{
+    ENTER = 13,
+    UP = 65,
+    DOWN = 66,
+    LEFT = 68,
+    RIGHT = 67,
+    BACK_SPACE = 127,
+    HOME = 104,
+    HOME1 = 72,
+    COLON = 58,
+    ESC = 27,
+    q = 113,
+    Q = 81
+};
 class FileList
 {
 private:
@@ -122,7 +139,6 @@ public:
     int row;
     int col;
 };
-
 struct abuf
 {
     char *b;
@@ -133,8 +149,6 @@ struct abuf
         NULL, 0   \
     }
 Config config;
-string buff;
-
 void abAppend(struct abuf *ab, const char *s, int len)
 {
     char *newstruct = (char *)realloc(ab->b, ab->len + len);
@@ -144,12 +158,10 @@ void abAppend(struct abuf *ab, const char *s, int len)
     ab->b = newstruct;
     ab->len += len;
 }
-
 void abFree(struct abuf *ab)
 {
     free(ab->b);
 }
-
 bool compareFileList(FileList i1, FileList i2)
 {
     return (i1.get_name() < i2.get_name());
@@ -216,63 +228,91 @@ bool search_dir(string search, string dir_name)
     }
     return 0;
 }
-void copy_dir(string source_path, string dest_path)
-{   struct stat f1;
-    stat(source_path.c_str(),&f1);
-    mkdir(dest_path.c_str(),f1.st_mode);
+bool copy_dir(string source_path, string dest_path, string parent)
+{
+    chdir(parent.c_str());
+    struct stat f1;
+
+    stat(source_path.c_str(), &f1);
+    if (mkdir(dest_path.c_str(), f1.st_mode) == -1)
+    {
+        return 0;
+    }
     DIR *dir = opendir(source_path.c_str());
     if (dir)
     {
         dirent *entity = readdir(dir);
         while (entity)
-        {   struct stat file;
+        {
+            struct stat file;
             string old_path = source_path + "/" + entity->d_name;
-            stat(old_path.c_str(),&file);
-            string new_path= dest_path + "/" +entity->d_name;
-            if (entity->d_type == DT_DIR){
+            stat(old_path.c_str(), &file);
+            string new_path = dest_path + "/" + entity->d_name;
+            if (entity->d_type == DT_DIR)
+            {
                 if (strcmp(entity->d_name, ".") != 0 && strcmp(entity->d_name, "..") != 0)
                 {
-                    
-                    copy_dir(old_path,new_path);
+
+                    if (copy_dir(old_path, new_path, source_path) == 0)
+                    {
+                        return 0;
+                    };
                 }
-            }else{
+            }
+            else
+            {
                 ifstream src;
                 ofstream dst;
                 src.open(old_path, ios::in | ios::binary);
                 dst.open(new_path, ios::out | ios::binary);
                 dst << src.rdbuf();
-                chmod(dest_path.c_str(), file.st_mode);
+                if (chmod(new_path.c_str(), file.st_mode) == -1)
+                {
+                    return 0;
+                }
                 src.close();
                 dst.close();
             }
             entity = readdir(dir);
         }
     }
+    return 1;
 }
-void delete_dir(string source_path,vector<string>& dirs)
-{
-   
+bool delete_dir(string source_path, stack<string> &dirs)
+{   
+    dirs.push(source_path);
     DIR *dir = opendir(source_path.c_str());
     if (dir)
     {
         dirent *entity = readdir(dir);
         while (entity)
-        {   struct stat file;
+        {
+            struct stat file;
             string old_path = source_path + "/" + entity->d_name;
-            stat(old_path.c_str(),&file);
-            
-            if (entity->d_type == DT_DIR){
+            stat(old_path.c_str(), &file);
+            if (entity->d_type == DT_DIR)
+            {
                 if (strcmp(entity->d_name, ".") != 0 && strcmp(entity->d_name, "..") != 0)
                 {
-                    dirs.push_back(old_path);
-                    //remove(old_path);
+
+                    if (delete_dir(old_path, dirs) == 0)
+                    {
+                        return 0;
+                    }
+                    // remove(old_path);
                 }
-            }else{
-                remove(old_path.c_str());
+            }
+            else
+            {
+                if (remove(old_path.c_str()) == -1)
+                {
+                    return 0;
+                };
             }
             entity = readdir(dir);
         }
     }
+    return 1;
 }
 vector<FileList> print_dir(string dir_name)
 {
@@ -286,10 +326,6 @@ vector<FileList> print_dir(string dir_name)
         dirent *entity = readdir(dir);
         while (entity)
         {
-            // string s=print_permission(dir_name+"/"+entity->d_name);
-            // cout<<s<<"\t\t"<<endl;
-            /* if(entity->d_type==DT_DIR&&strcmp(entity->d_name,".")!=0&&strcmp(entity->d_name,"..")!=0)
-                print_dir(dir_name+"/"+entity->d_name); */
             FileList f = create_file(dir_name, entity->d_name);
             ;
             if (entity->d_type == DT_DIR)
@@ -313,12 +349,10 @@ vector<FileList> print_dir(string dir_name)
     }
     return l;
 }
-
 void disableRawMode()
 {
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &config.orig_termios);
 }
-
 void enableRawMode()
 {
 
@@ -343,12 +377,6 @@ void readKey(char *ch)
 
     read(STDIN_FILENO, ch, 3);
 }
-/* void editorDrawRows() {
-int y;
-for (y = 0; y < 24; y++) {
-    write(STDOUT_FILENO, "~\r\n", 3);
-}
-} */
 void editorScroll()
 {
     if (config.y < config.rowoff)
@@ -364,9 +392,10 @@ void editorDraw(struct abuf *ab, vector<FileList> &f, bool *normal)
 {
     int y;
     string dir = f[0].get_dir_name();
+   
     // if(f.size()>config.row) config.row=f.size()+1;
     for (y = 0; y < config.row; y++)
-    {
+    {    write(STDOUT_FILENO, "\x1b[2K", 4);
         int file_row = y + config.rowoff;
         if (file_row < f.size() && y < config.row - 1)
         {
@@ -374,12 +403,29 @@ void editorDraw(struct abuf *ab, vector<FileList> &f, bool *normal)
             const char *permission = f[file_row].get_permissions().c_str();
             const char *user = f[file_row].get_user();
             const char *group = f[file_row].get_group();
-            long int size = f[file_row].get_file_size();
+            double size = f[file_row].get_file_size();
 
             const char *file_name = f[file_row].get_file_name();
-            int rowlen = snprintf(row, sizeof(row), "%s\t%s%15s%15ldB\t%.24s\t%.70s", f[file_row].get_permissions().c_str(), f[file_row].get_user(), f[file_row].get_group(), f[file_row].get_file_size(), f[file_row].get_last_modified().c_str(), f[file_row].get_file_name());
-            if (rowlen > config.col - 10)
-                rowlen = config.col - 10;
+            char ch;
+            if(size>=1024){
+                ch='K';
+                size/=1024;
+            }
+            if(size>=1024){
+                ch='M';
+                size/=1024;
+            }
+            if(size>=1024){
+                ch='G';
+                size/=1024;
+            }
+            if(size>=1024){
+                ch='T';
+                size/=1024;
+            }
+            int rowlen = snprintf(row, sizeof(row), "%-25.20s\t%s\t%5s\t%5.1lf%cB\t\t%.24s\t%s", f[file_row].get_file_name(), f[file_row].get_user(), f[file_row].get_group(), size,ch, f[file_row].get_last_modified().c_str(), f[file_row].get_permissions().c_str());
+            if (rowlen > config.col - 20)
+                rowlen = config.col - 20;
             write(STDOUT_FILENO, row, rowlen);
         }
         if (*normal)
@@ -408,58 +454,35 @@ void editorDraw(struct abuf *ab, vector<FileList> &f, bool *normal)
             }
         }
         write(STDOUT_FILENO, "\x1b[K", 3);
-        // abAppend(ab, "\x1b[K", 3);
+        //write(STDOUT_FILENO, "\x1b[?7l", 5);
+
+        // abAppend(&ab,"\x1b[?7l", 5);
+        //  abAppend(ab, "\x1b[K", 3);
         if (y < config.row - 1)
         {
             write(STDOUT_FILENO, "\r\n", 3);
         }
     }
 }
-/* string convert_binary(string s){
-    int k=0;
-    for(int i=0;i<s.length();i++){
-        k=2*k+(s[i]-'0');
-    }
-    return to_string(k);
-}
-int get_permission_file(struct stat fileStat)
-{   string perm;
-    string user_p;
-    (fileStat.st_mode & S_IRUSR) ? user_p.append(1, '1') : user_p.append(1, '0');
-    (fileStat.st_mode & S_IWUSR) ? user_p.append(1, '1') : user_p.append(1, '0');
-    (fileStat.st_mode & S_IXUSR) ? user_p.append(1, '1') : user_p.append(1, '0');
-    perm.append(convert_binary(user_p));
-    string grp_p;
-    (fileStat.st_mode & S_IRGRP) ? grp_p.append(1, '1') : grp_p.append(1, '0');
-    (fileStat.st_mode & S_IWGRP) ? grp_p.append(1, '1') : grp_p.append(1, '0');
-    (fileStat.st_mode & S_IXGRP) ? grp_p.append(1, '1') : grp_p.append(1, '0');
-    perm.append(convert_binary(grp_p));
-    string other_p;
-    (fileStat.st_mode & S_IROTH) ? other_p.append(1, '1') : other_p.append(1, '0');
-    (fileStat.st_mode & S_IWOTH) ? other_p.append(1, '1') : other_p.append(1, '0');
-    (fileStat.st_mode & S_IXOTH) ? other_p.append(1, '1') : other_p.append(1, '0');
-    perm.append(convert_binary(other_p));
-    return stoi(perm,0,8);
-} */
 void refreshScreen(vector<FileList> &f, bool *normal)
 {
 
     struct abuf ab = ABUF_INIT;
 
     abAppend(&ab, "\x1b[?25l", 6);
-    // abAppend(&ab, "\x1b[2J", 4);
+    //abAppend(&ab, "\x1b[2K", 4);
     abAppend(&ab, "\x1b[H", 3);
     write(STDOUT_FILENO, ab.b, ab.len);
     editorDraw(&ab, f, normal);
     ab = ABUF_INIT;
     abAppend(&ab, "\x1b[H", 3);
     abAppend(&ab, "\x1b[?25h", 6);
+
     abAppend(&ab, "\x1b[1;1H", 6);
     write(STDOUT_FILENO, ab.b, ab.len);
 
     abFree(&ab);
 }
-
 int getCursorPosition(int *rows, int *cols)
 {
     string s;
@@ -482,18 +505,6 @@ int getCursorPosition(int *rows, int *cols)
         return -1;
     return 0;
 }
-
-/* void redraw_scroll(vector<FileList>& f){
-    struct abuf ab = ABUF_INIT;
-    write(STDOUT_FILENO, "\x1b[2J", 4);
-
-    //abAppend(&ab, "\x1b[1;1H", 6);
-    editorDraw(&ab,f);
-    write(STDOUT_FILENO, ab.b, ab.len);
-//abAppend(&ab, "\x1b[1;1H", 6);
-
-abFree(&ab);
-} */
 int getWindowSize(int *rows, int *cols)
 {
     struct winsize ws;
@@ -518,6 +529,13 @@ void set_zero()
     config.y = 1;
     config.numrows = 0;
     config.rowoff = 0;
+}
+void reposition_cursor(int x, int y, int rowoff, int numrows)
+{
+    config.x = x;
+    config.y = y;
+    config.numrows = numrows;
+    config.rowoff = rowoff;
 }
 void cmd_set_zero()
 {
@@ -606,36 +624,713 @@ void refresh_print_screen(char *buf, vector<FileList> &f, bool *normal, string s
 string handle_path(FileList f, string s)
 {
     vector<string> tokens = split_string(s, '/');
+    string dir;
+    vector<string> format;
     if (tokens[0] == "~")
     {
-        string home = getenv("HOME");
-
+        dir = getenv("HOME");
         for (int i = 1; i < tokens.size(); i++)
         {
-            home += "/" + tokens[i];
+            dir+="/"+tokens[i];
         }
-        return home;
     }
     else if (tokens[0] == ".")
     {
-        string home = f.get_dir_name();
-
+        dir = f.get_dir_name();
         for (int i = 1; i < tokens.size(); i++)
         {
-            home += "/" + tokens[i];
+            dir+="/"+tokens[i];
         }
-        return home;
     }
     else if (tokens[0] == "..")
     {
-        string home = getParent_dir(f.get_dir_name());
+        dir = getParent_dir(f.get_dir_name());
         for (int i = 1; i < tokens.size(); i++)
         {
-            home += "/" + tokens[i];
+            dir+="/"+tokens[i];
         }
-        return home;
     }
-    return s;
+    else
+    {   if(s[0]=='/')
+            dir = s;
+        else
+            dir = f.get_dir_name()+"/"+s;
+    }
+    if (!dir.empty())
+    {
+        vector<string> new_tokens = split_string(dir, '/');
+        for (int i = 1; i < new_tokens.size(); i++)
+        {
+            format.push_back("/" + new_tokens[i]);
+        }
+    }
+    vector<string> v;
+    for (int i = 0; i < format.size(); i++)
+    {
+
+        if (format[i] == "/..")
+        {
+            v.pop_back();
+        }
+        else if (format[i] == "/.")
+        {
+            continue;
+        }else{
+            v.push_back(format[i]);
+        }
+        
+    }
+    string x;
+    for (int i = 0; i < v.size(); i++)
+    {
+        x += v[i];
+    }
+    return x;
+}
+void command_goto(vector<FileList> &f, vector<string> &l, int *index, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 2)
+    {
+        string path = handle_path(f[0], tokens[1]);
+        DIR *dir = opendir(path.c_str());
+        if (dir)
+        {
+            string new_path = path;
+            f = print_dir(new_path);
+            if (*index < l.size() - 1)
+                l.erase(l.begin() + *index + 1, l.end());
+            l.push_back(new_path);
+            *index = *index + 1;
+            refresh_print_screen(buf, f, normal,path);
+        }
+        else if (ENOENT == errno)
+        {
+
+            refresh_print_screen(buf, f, normal, "Directory does not exist");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error while opening Directory");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_search(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 2)
+    {
+        int found = search_dir(tokens[1], getenv("HOME"));
+        if (found)
+        {
+            refresh_print_screen(buf, f, normal, "True");
+        }
+        else
+        {
+            refresh_print_screen(buf, f, normal, "False");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_quit(char *key, vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    *normal = true;
+    refreshScreen(f, normal);
+    set_zero();
+    int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
+    s.erase();
+    key[0] = 'q';
+    write(STDOUT_FILENO, buf, len);
+}
+void command_create_dir(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 3)
+    {
+        DIR *dir = opendir(tokens[2].c_str());
+        if (dir)
+        {
+            /* Directory exists. */
+            string new_path = tokens[2] + "/" + tokens[1];
+            if (mkdir(new_path.c_str(), 0777) == -1)
+            {
+                refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+            }
+            else
+            {
+
+                refresh_print_screen(buf, f, normal, "Directory Created Successfully");
+            }
+        }
+        else if (ENOENT == errno)
+        {
+            /* Directory does not exist. */
+            refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_create_file(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 3)
+    {
+        DIR *dir = opendir(tokens[2].c_str());
+        if (dir)
+        {
+            /* Directory exists. */
+            std::ofstream(tokens[2] + "/" + tokens[1]);
+            f = print_dir(tokens[2]);
+            refresh_print_screen(buf, f, normal, "File Created Successfully");
+        }
+        else if (ENOENT == errno)
+        {
+            /* Directory does not exist. */
+            refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+        }
+    }
+    else if (tokens.size() == 2)
+    {
+        std::ofstream(f[0].get_dir_name() + "/" + tokens[1]);
+        f = print_dir(f[0].get_dir_name());
+        refresh_print_screen(buf, f, normal, "File Created Successfully");
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_rename(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 3)
+    {
+        string full_path = handle_path(f[0],  tokens[1]);
+        struct stat buffer;
+        if ((stat(full_path.c_str(), &buffer) == 0))
+        {
+            string new_path = handle_path(f[0], tokens[2]);
+            /* Directory exists. */
+            if (rename(full_path.c_str(), new_path.c_str()) == 0)
+            {
+                f = print_dir(f[0].get_dir_name());
+                refresh_print_screen(buf, f, normal, "File Renamed Successfully");
+            }
+            else
+                refresh_print_screen(buf, f, normal, "Error while Renaming file");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_delete_dir(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 2)
+    {
+        /* Directory exists. */
+        stack<string> v;
+        bool fault = false;
+        if (delete_dir(handle_path(f[0],tokens[1]), v) == 1)
+        {
+            while (!v.empty())
+            {
+                if (remove(v.top().c_str()) == -1)
+                {
+                    fault = true;
+                    break;
+                };
+                v.pop();
+            }
+            if (!fault)
+                refresh_print_screen(buf, f, normal, "Directory Deleted Successfully");
+            else
+                refresh_print_screen(buf, f, normal, "Error Occurred while removing Directory");
+        }
+        else
+        {
+            refresh_print_screen(buf, f, normal, "Error Occurred while removing Directory");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_delete_file(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() == 2)
+    {
+        /* Directory exists. */
+        string src_path = handle_path(f[0],tokens[1]);
+        struct stat buffer;
+        if ((stat(src_path.c_str(), &buffer) == 0))
+        {
+            remove(src_path.c_str());
+            refresh_print_screen(buf, f, normal, "File Deleted Successfully");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_move(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() >= 3)
+    {
+        DIR *dir = opendir(tokens[tokens.size() - 1].c_str());
+        if (dir)
+        {
+            string message;
+            for (int i = 1; i < tokens.size() - 1; i++)
+            {
+                /* Directory exists. */
+                string src_path = handle_path(f[0], tokens[i]);
+                DIR *s_dir = opendir(src_path.c_str());
+                if (s_dir)
+                {
+
+                    /* Directory exists. */
+                    string dest_path = tokens[tokens.size() - 1] + "/" + tokens[i];
+                    if (rename(src_path.c_str(), dest_path.c_str()) == 0)
+                    {
+                        message += tokens[i] + ":Directory Moved Successfully\t";
+                    }
+                    else
+                        message += tokens[i] + ":Error while Moving Directory\t";
+                }
+                else
+                {
+                    struct stat buffer;
+                    if ((stat(src_path.c_str(), &buffer) == 0))
+                    {
+                        string dest_path = tokens[tokens.size() - 1] + "/" + tokens[i];
+                        move_file(src_path, dest_path, buffer);
+                        message += tokens[i] + ":File Moved Successfully\t";
+                    }
+                    else
+                    {
+                        /* opendir() failed for some other reason. */
+                        message += tokens[i] + ":Error:File Does not Exist\t";
+                    }
+                }
+                f = print_dir(f[0].get_dir_name());
+                refresh_print_screen(buf, f, normal, message);
+            }
+        }
+        else if (ENOENT == errno)
+        {
+            /* Directory does not exist. */
+            refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_copy(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
+{
+    if (tokens.size() >= 3)
+    {
+        DIR *dir = opendir(handle_path(f[0],tokens[tokens.size() - 1]).c_str());
+        if (dir)
+        {
+            string message;
+            for (int i = 1; i < tokens.size() - 1; i++)
+            {
+                /* Directory exists. */
+                string src_path = handle_path(f[0],tokens[i]);
+                DIR *s_dir = opendir(src_path.c_str());
+                if (s_dir)
+                {
+                    if(copy_dir(src_path, handle_path(f[0],tokens[tokens.size() - 1]) + "/" + tokens[i], tokens[tokens.size() - 1]))
+                        message += tokens[i] + ":Directory copied Successfully\t";
+                    else
+                        message += tokens[i] + ":Directory exist\t";
+                }
+                else
+                {
+                    struct stat buffer;
+                    if ((stat(src_path.c_str(), &buffer) == 0))
+                    {
+                        string dest_path = handle_path(f[0],tokens[tokens.size() - 1]) + "/" + tokens[i];
+                        copy_file(src_path, dest_path, buffer);
+                        message += tokens[i] + ":File copied Successfully\t";
+                    }
+                    else
+                    {
+                        /* opendir() failed for some other reason. */
+                        message += tokens[i] + ":Error-File Does not Exist\t";
+                    }
+                }
+            }
+            f = print_dir(f[0].get_dir_name());
+            refresh_print_screen(buf, f, normal, message);
+        }
+        else if (ENOENT == errno)
+        {
+            /* Directory does not exist. */
+            refresh_print_screen(buf, f, normal, "Detination Directory Does Not Exist");
+        }
+        else
+        {
+            /* opendir() failed for some other reason. */
+            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+        }
+    }
+    else
+    {
+        refresh_print_screen(buf, f, normal, "Not Valid Input");
+    }
+
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void command_mode(char *key, vector<FileList> &f, vector<string> &l, int *index, bool *normal, string &s, char *buf)
+{
+    if (iscntrl(key[0]))
+    {
+        if (int(key[0]) == 13)
+        {
+            if (!s.empty())
+            {
+                vector<string> tokens = split_string(s, ' ');
+                if (tokens[0] == "goto")
+                {
+                    command_goto(f, l, index, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "search")
+                {
+                    command_search(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "copy")
+                {
+                    command_copy(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "move")
+                {
+                    command_move(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "delete_dir")
+                {
+                    command_delete_dir(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "delete_file")
+                {
+                    command_delete_file(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "create_dir")
+                {
+                    command_create_dir(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "create_file")
+                {
+                    command_create_file(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "rename")
+                {
+                    command_rename(f, l, normal, s, buf, tokens);
+                }
+                else if (tokens[0] == "quit" || tokens[0] == "QUIT")
+                {
+                    command_quit(key, f, l, normal, s, buf, tokens);
+                }
+                else
+                {
+                    refresh_print_screen(buf, f, normal, "Not Valid Input");
+                    cmd_set_zero();
+                    move_cursor(buf, f, normal);
+                    s.erase();
+                }
+            }
+        }
+        else if (int(key[0]) == ESC && int(key[1]) == 0)
+        {
+            *normal = true;
+            refreshScreen(f, normal);
+            set_zero();
+            int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
+            s.erase();
+            write(STDOUT_FILENO, buf, len);
+        }
+        else if (int(key[0]) == BACK_SPACE)
+        {
+            if (!s.empty())
+                s.pop_back();
+            refreshScreen(f, normal);
+            cmd_set_zero();
+            int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
+            write(STDOUT_FILENO, buf, len);
+            write(STDOUT_FILENO, s.c_str(), s.length());
+        }
+    }
+    else
+    {
+        char *k = key;
+
+        s.push_back(key[0]);
+        write(STDOUT_FILENO, k, 1);
+    }
+}
+void move_to_parent(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    FileList file = f[1];
+    string new_path = file.get_dir_name() + "/" + file.get_name();
+    if (!getParent_dir(file.get_dir_name()).empty())
+    {
+        new_path = getParent_dir(file.get_dir_name());
+        l.push_back(new_path);
+        *index = *index + 1;
+        f = print_dir(new_path);
+        set_zero();
+        refreshScreen(f, normal);
+    }
+}
+void move_cursor_down(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    if (config.y < config.row - 1)
+    {
+        if (config.y < f.size())
+            config.y++;
+        int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
+        write(STDOUT_FILENO, buf, len);
+    }
+    else
+    {
+        if (config.y + config.rowoff < f.size())
+            config.rowoff++;
+        // clear_screen();
+        move_cursor(buf, f, normal);
+    }
+}
+void move_cursor_up(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    if (config.y > 1)
+    {
+        config.y--;
+        int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
+        write(STDOUT_FILENO, buf, len);
+    }
+    else
+    {
+        if (config.y + config.rowoff > 1)
+        {
+            config.rowoff--;
+
+            move_cursor(buf, f, normal);
+        }
+    }
+}
+void move_next_dir(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    if (*index < l.size() - 1)
+    {
+        *index = *index + 1;
+        f = print_dir(l[*index]);
+        set_zero();
+        refreshScreen(f, normal);
+    }
+}
+void move_previous_dir(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    if (*index > 0)
+    {
+        *index = *index - 1;
+        f = print_dir(l[*index]);
+        set_zero();
+        refreshScreen(f, normal);
+    }
+}
+void move_to_home_dir(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    string home = getenv("HOME");
+    l.push_back(home);
+    *index = *index + 1;
+    f = print_dir(home);
+    set_zero();
+    refreshScreen(f, normal);
+}
+void escape_from_normal_mode(vector<FileList> &f, vector<string> &l, int *index, bool *normal, string &s, char *buf)
+{
+    *normal = false;
+    refreshScreen(f, normal);
+    cmd_set_zero();
+    move_cursor(buf, f, normal);
+    s.erase();
+}
+void process_file(string new_path)
+{
+    pid_t pid = fork();
+    if (pid == 0)
+    {
+        /* char* ifname_cchararr = (char*)malloc(new_path.length() + 1);
+            strcpy (ifname_cchararr, new_path.c_str());
+            char* const argv[4] = {"xterm", "vim", ifname_cchararr, NULL};
+        // std::cout << ifname_cchararr<<std::endl;
+            execvp ("xterm", argv); */
+        execl("/usr/bin/xdg-open", "xdg-open", new_path.c_str(), (char *)0);
+        // execl("/usr/bin/vim", "vim", new_path.c_str(), (char *)0);
+    }
+}
+void process_dir(vector<FileList> &f, FileList file, vector<string> &l, int *index, bool *normal, string new_path, char *buf)
+{
+    if (strcmp(file.get_file_name(), "..") != 0)
+    {
+        if (*index < l.size() - 1)
+            l.erase(l.begin() + *index + 1, l.end());
+        l.push_back(new_path);
+        *index = *index + 1;
+        f = print_dir(new_path);
+        set_zero();
+        refreshScreen(f, normal);
+    }
+    else
+    {
+        if (!getParent_dir(file.get_dir_name()).empty())
+        {
+            new_path = getParent_dir(file.get_dir_name());
+            if (*index < l.size() - 1)
+                l.erase(l.begin() + *index + 1, l.end());
+            l.push_back(new_path);
+            *index = *index + 1;
+            f = print_dir(new_path);
+            set_zero();
+            refreshScreen(f, normal);
+        }
+    }
+}
+void process_index(vector<FileList> &f, vector<string> &l, int *index, bool *normal, char *buf)
+{
+    FileList file = f[config.y + config.rowoff - 1];
+    string new_path = file.get_dir_name() + "/" + file.get_name();
+    if (file.get_permissions()[0] == 'd' && strcmp(file.get_file_name(), ".") != 0)
+    {
+        process_dir(f, file, l, index, normal, new_path, buf);
+    }
+    else if (file.get_permissions()[0] == '-')
+    {
+        process_file(new_path);
+    }
+}
+void normal_mode(char *key, vector<FileList> &f, vector<string> &l, int *index, bool *normal, string &s, char *buf)
+{
+    if (iscntrl(key[0]))
+    {
+        if (int(key[0]) == BACK_SPACE)
+        {
+            move_to_parent(f, l, index, normal, buf);
+        }
+        else if (int(key[0]) == 27)
+        {
+
+            if (int(key[1]) == 91)
+            {
+
+                if (int(key[2]) == DOWN)
+                {
+
+                    move_cursor_down(f, l, index, normal, buf);
+                    // redraw_scroll(f);
+                }
+                else if (int(key[2]) == UP)
+                {
+                    move_cursor_up(f, l, index, normal, buf);
+                }
+                else if (int(key[2]) == RIGHT)
+                {
+                    // write(STDOUT_FILENO, "right", 5);
+                    move_next_dir(f, l, index, normal, buf);
+                }
+                else if (int(key[2]) == LEFT)
+                {
+                    // write(STDOUT_FILENO, "left", 4);
+                    move_previous_dir(f, l, index, normal, buf);
+                }
+                else if (int(key[2]) == HOME1)
+                {
+                    move_to_home_dir(f, l, index, normal, buf);
+                }
+            }
+        }
+        else if (int(key[0]) == ENTER)
+        {
+            process_index(f, l, index, normal, buf);
+        }
+    }
+    else
+    {
+        if (int(key[0]) == HOME || int(key[0]) == HOME1)
+        {
+            move_to_home_dir(f, l, index, normal, buf);
+        }
+        else if (int(key[0]) == COLON)
+        {
+            escape_from_normal_mode(f, l, index, normal, s, buf);
+        }
+    }
 }
 void editorMoveCursor(char *key, vector<FileList> &f, vector<string> &l, int *index, bool *normal, string &s)
 {
@@ -643,519 +1338,13 @@ void editorMoveCursor(char *key, vector<FileList> &f, vector<string> &l, int *in
 
     if (*normal)
     {
-        if (iscntrl(key[0]))
-        {
-            if (int(key[0]) == 127)
-            {
-                FileList file = f[1];
-                string new_path = file.get_dir_name() + "/" + file.get_name();
-                if (!getParent_dir(file.get_dir_name()).empty())
-                {
-                    new_path = getParent_dir(file.get_dir_name());
-                    l.push_back(new_path);
-                    *index = *index + 1;
-                    f = print_dir(new_path);
-                    set_zero();
-                    refreshScreen(f, normal);
-                }
-            }
-            else if (int(key[0]) == 27)
-            {
-
-                if (int(key[1]) == 91)
-                {
-
-                    if (int(key[2]) == 66)
-                    {
-                        if (config.y < config.row - 1)
-                        {
-                            config.y++;
-                            int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
-                            write(STDOUT_FILENO, buf, len);
-                        }
-                        else
-                        {
-                            if (config.y + config.rowoff < f.size())
-                                config.rowoff++;
-                            // clear_screen();
-                            move_cursor(buf, f, normal);
-                        }
-
-                        // redraw_scroll(f);
-                    }
-                    else if (int(key[2]) == 65)
-                    {
-                        if (config.y > 1)
-                        {
-                            config.y--;
-                            int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
-                            write(STDOUT_FILENO, buf, len);
-                        }
-                        else
-                        {
-                            if (config.y + config.rowoff > 1)
-                            {
-                                config.rowoff--;
-
-                                move_cursor(buf, f, normal);
-                            }
-                        }
-
-                        // redraw_scroll(f);
-                    }
-                    else if (int(key[2]) == 67)
-                    {
-                        // write(STDOUT_FILENO, "right", 5);
-                        if (*index < l.size() - 1)
-                        {
-                            *index = *index + 1;
-                            f = print_dir(l[*index]);
-                            set_zero();
-                            refreshScreen(f, normal);
-                        }
-                    }
-                    else if (int(key[2]) == 68)
-                    {
-                        // write(STDOUT_FILENO, "left", 4);
-                        if (*index > 0)
-                        {
-                            *index = *index - 1;
-                            f = print_dir(l[*index]);
-                            set_zero();
-                            refreshScreen(f, normal);
-                        }
-                    }
-                    else if (int(key[2]) == 72)
-                    {
-                        string home = getenv("HOME");
-                        l.push_back(home);
-                        *index = *index + 1;
-                        f = print_dir(home);
-                        set_zero();
-                        refreshScreen(f, normal);
-                    }
-                }
-            }
-            else if (int(key[0]) == 13)
-            {
-                FileList file = f[config.y + config.rowoff - 1];
-                string new_path = file.get_dir_name() + "/" + file.get_name();
-                if (file.get_permissions()[0] == 'd' && strcmp(file.get_file_name(), ".") != 0)
-                {
-                    if (strcmp(file.get_file_name(), "..") != 0)
-                    {
-                        if (*index < l.size() - 1)
-                            l.erase(l.begin() + *index + 1, l.end());
-                        l.push_back(new_path);
-                        *index = *index + 1;
-                        f = print_dir(new_path);
-                        set_zero();
-                        refreshScreen(f, normal);
-                    }
-                    else
-                    {
-                        if (!getParent_dir(file.get_dir_name()).empty())
-                        {
-                            new_path = getParent_dir(file.get_dir_name());
-                            if (*index < l.size() - 1)
-                                l.erase(l.begin() + *index + 1, l.end());
-                            l.push_back(new_path);
-                            *index = *index + 1;
-                            f = print_dir(new_path);
-                            set_zero();
-                            refreshScreen(f, normal);
-                        }
-                    }
-                }
-                else if (file.get_permissions()[0] == '-')
-                {
-
-                    pid_t pid = fork();
-                    if (pid == 0)
-                    {
-                        execl("/usr/bin/xdg-open", "xdg-open", new_path.c_str(), (char *)0);
-                        // execl("/usr/bin/vim", "vim", new_path.c_str(), (char *)0);
-                    }
-                }
-            }
-        }
-        else
-        {
-            if (int(key[0]) == 104 || int(key[0]) == 72)
-            {
-                string home = getenv("HOME");
-                l.push_back(home);
-                *index = *index + 1;
-                set_zero();
-                refreshScreen(f, normal);
-            }
-            else if (int(key[0]) == 58)
-            {
-                *normal = false;
-                refreshScreen(f, normal);
-                cmd_set_zero();
-                move_cursor(buf, f, normal);
-                s.erase();
-            }
-        }
+        normal_mode(key, f, l, index, normal, s, buf);
     }
     else
     {
-        if (iscntrl(key[0]))
-        {
-            if (int(key[0]) == 13)
-            {
-                if (!s.empty())
-                {
-                    vector<string> tokens = split_string(s, ' ');
-                    if (tokens[0] == "goto")
-                    {
-                        if (tokens.size() == 2)
-                        {
-                            string path = handle_path(f[0], tokens[1]);
-                            DIR *dir = opendir(path.c_str());
-                            if (dir)
-                            {
-                                string new_path = path;
-                                f = print_dir(new_path);
-                                if (*index < l.size() - 1)
-                                    l.erase(l.begin() + *index + 1, l.end());
-                                l.push_back(new_path);
-                                *index = *index + 1;
-                                cmd_set_zero();
-                                move_cursor(buf, f, normal);
-                            }
-                            else if (ENOENT == errno)
-                            {
-
-                                refresh_print_screen(buf, f, normal, "Directory does not exist");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error while opening Directory");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "search")
-                    {
-                        if (tokens.size() == 2)
-                        {
-                            int found = search_dir(tokens[1], getenv("HOME"));
-                            if (found)
-                            {
-                                refresh_print_screen(buf, f, normal, "True");
-                            }
-                            else
-                            {
-                                refresh_print_screen(buf, f, normal, "False");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "copy")
-                    {
-                        if (tokens.size() == 3)
-                        {
-                            DIR *dir = opendir(tokens[2].c_str());
-                            if (dir)
-                            {
-                                /* Directory exists. */
-                                string src_path = handle_path(f[0], "./" + tokens[1]);
-                                DIR *s_dir = opendir(src_path.c_str());
-                                if (s_dir)
-                                {
-                                    copy_dir(src_path,tokens[2]+"/"+tokens[1]);
-                                     f = print_dir(f[0].get_dir_name());
-                                    refresh_print_screen(buf, f, normal, "Diretory copied Successfully");
-                                }
-                                else
-                                {
-                                    struct stat buffer;
-                                    if ((stat(src_path.c_str(), &buffer) == 0))
-                                    {
-                                        string dest_path = tokens[2] + "/" + tokens[1];
-                                        copy_file(src_path, dest_path, buffer);
-                                        f = print_dir(f[0].get_dir_name());
-                                        refresh_print_screen(buf, f, normal, "File copied Successfully");
-                                    }
-                                    else
-                                    {
-                                        /* opendir() failed for some other reason. */
-                                        refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
-                                    }
-                                }
-                            }
-                            else if (ENOENT == errno)
-                            {
-                                /* Directory does not exist. */
-                                refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "move")
-                    {
-                        if (tokens.size() == 3)
-                        {
-                            DIR *dir = opendir(tokens[2].c_str());
-                            if (dir)
-                            {
-                                /* Directory exists. */
-                                string src_path = handle_path(f[0], "./" + tokens[1]);
-                                DIR *s_dir = opendir(src_path.c_str());
-                                if (s_dir)
-                                {
-
-                                    /* Directory exists. */
-                                    string dest_path = tokens[2] + "/" + tokens[1];
-                                    if (rename(src_path.c_str(), dest_path.c_str()) == 0)
-                                    {
-                                        f = print_dir(f[0].get_dir_name());
-                                        refresh_print_screen(buf, f, normal, "Directory Moved Successfully");
-                                    }
-                                    else
-                                        refresh_print_screen(buf, f, normal, "Error while Moving Directory");
-                                }
-                                else
-                                {
-                                    struct stat buffer;
-                                    if ((stat(src_path.c_str(), &buffer) == 0))
-                                    {
-                                        string dest_path = tokens[2] + "/" + tokens[1];
-                                        move_file(src_path, dest_path, buffer);
-                                        f = print_dir(f[0].get_dir_name());
-                                        refresh_print_screen(buf, f, normal, "File Moved Successfully");
-                                    }
-                                    else
-                                    {
-                                        /* opendir() failed for some other reason. */
-                                        refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
-                                    }
-                                }
-                            }
-                            else if (ENOENT == errno)
-                            {
-                                /* Directory does not exist. */
-                                refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "delete_dir")
-                    {
-                    }
-                    else if (tokens[0] == "delete_file")
-                    {
-                        if (tokens.size() == 2)
-                        {
-                            /* Directory exists. */
-                            string src_path = handle_path(f[0], "./" + tokens[1]);
-                            struct stat buffer;
-                            if ((stat(src_path.c_str(), &buffer) == 0))
-                            {
-                                remove(src_path.c_str());
-                                refresh_print_screen(buf, f, normal, "File Deleted Successfully");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "create_dir")
-                    {
-                        if (tokens.size() == 3)
-                        {
-                            DIR *dir = opendir(tokens[2].c_str());
-                            if (dir)
-                            {
-                                /* Directory exists. */
-                                string new_path = tokens[2] + "/" + tokens[1];
-                                if (mkdir(new_path.c_str(), 0777) == -1)
-                                {
-                                    refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
-                                }
-                                else
-                                {
-
-                                    refresh_print_screen(buf, f, normal, "Directory Created Successfully");
-                                }
-                            }
-                            else if (ENOENT == errno)
-                            {
-                                /* Directory does not exist. */
-                                refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "create_file")
-                    {
-                        if (tokens.size() == 3)
-                        {
-                            DIR *dir = opendir(tokens[2].c_str());
-                            if (dir)
-                            {
-                                /* Directory exists. */
-                                std::ofstream(tokens[2] + "/" + tokens[1]);
-                                f = print_dir(tokens[2]);
-                                refresh_print_screen(buf, f, normal, "File Created Successfully");
-                            }
-                            else if (ENOENT == errno)
-                            {
-                                /* Directory does not exist. */
-                                refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
-                            }
-                        }
-                        else if (tokens.size() == 2)
-                        {
-                            std::ofstream(f[0].get_dir_name() + "/" + tokens[1]);
-                            f = print_dir(f[0].get_dir_name());
-                            refresh_print_screen(buf, f, normal, "File Created Successfully");
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else if (tokens[0] == "rename")
-                    {
-                        if (tokens.size() == 3)
-                        {
-                            string full_path = handle_path(f[0], "./" + tokens[1]);
-                            struct stat buffer;
-                            if ((stat(full_path.c_str(), &buffer) == 0))
-                            {
-                                string new_path = handle_path(f[0], "./" + tokens[2]);
-                                /* Directory exists. */
-                                if (rename(full_path.c_str(), new_path.c_str()) == 0)
-                                {
-                                    f = print_dir(f[0].get_dir_name());
-                                    refresh_print_screen(buf, f, normal, "File Renamed Successfully");
-                                }
-                                else
-                                    refresh_print_screen(buf, f, normal, "Error while Renaming file");
-                            }
-                            else
-                            {
-                                /* opendir() failed for some other reason. */
-                                refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
-                            }
-                        }
-                        else
-                        {
-                            refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        }
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                    else
-                    {
-                        refresh_print_screen(buf, f, normal, "Not Valid Input");
-                        cmd_set_zero();
-                        move_cursor(buf, f, normal);
-                        s.erase();
-                    }
-                }
-            }
-            else if (int(key[0]) == 27 && int(key[1]) == 0)
-            {
-                *normal = true;
-                refreshScreen(f, normal);
-                set_zero();
-                int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
-                s.erase();
-                write(STDOUT_FILENO, buf, len);
-            }
-            else if (int(key[0]) == 127)
-            {
-                if (!s.empty())
-                    s.pop_back();
-                refreshScreen(f, normal);
-                cmd_set_zero();
-                int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
-                write(STDOUT_FILENO, buf, len);
-                write(STDOUT_FILENO, s.c_str(), s.length());
-            }
-        }
-        else
-        {
-            char *k = key;
-
-            s.push_back(key[0]);
-            write(STDOUT_FILENO, k, 1);
-        }
+        command_mode(key, f, l, index, normal, s, buf);
     }
 }
-
 void init(vector<string> &l)
 {
     set_zero();
@@ -1168,7 +1357,6 @@ void init(vector<string> &l)
     }
     clear_screen();
 }
-
 void editor()
 {
 
@@ -1181,26 +1369,37 @@ void editor()
     bool normal = true;
     refreshScreen(f, &normal);
     string s;
+    int newy, newx;
     while (true)
     {
-        // getWindowSize(&config.row,&config.col);
-        // refreshScreen(f,&normal);
+
         char ch[3] = {'\0'};
+        getWindowSize(&newy, &newx);
+        if (newy != config.row || newx != config.col)
+        {
+            f = print_dir(f[0].get_dir_name());
+            config.row = newy;
+            config.col = newx;
+            if (normal)
+                set_zero();
+            else
+                cmd_set_zero();
+            refreshScreen(f, &normal);
+            char buf[32];
+            int len = snprintf(buf, sizeof(buf), "\x1b[%d;%dH", config.y, config.x);
+            write(STDOUT_FILENO, buf, len);
+        }
         readKey(ch);
 
         editorMoveCursor(ch, f, dir_names, &index, &normal, s);
 
-        /* if(ch=='c')
-            refreshScreen(); */
-
-        if (ch[0] == 'q' && normal)
+        if (int((ch[0]) == q || int(ch[0]) == Q) && normal)
         {
             clear_screen();
             break;
         }
     }
 }
-
 int main()
 {
 
