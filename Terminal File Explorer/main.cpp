@@ -423,7 +423,12 @@ void editorDraw(struct abuf *ab, vector<FileList> &f, bool *normal)
                 ch='T';
                 size/=1024;
             }
-            int rowlen = snprintf(row, sizeof(row), "%-25.20s\t%s\t%5s\t%5.1lf%cB\t\t%.24s\t%s", f[file_row].get_file_name(), f[file_row].get_user(), f[file_row].get_group(), size,ch, f[file_row].get_last_modified().c_str(), f[file_row].get_permissions().c_str());
+            int rowlen;
+            if(f[file_row].get_permissions()[0]=='d')
+                rowlen = snprintf(row, sizeof(row), "\x1b[1m\x1b[34m%-25.20s\x1b[0m\t%s\t%5s\t%5.1lf%cB\t\t%.24s\t%s", f[file_row].get_file_name(), f[file_row].get_user(), f[file_row].get_group(), size,ch, f[file_row].get_last_modified().c_str(), f[file_row].get_permissions().c_str());
+            else
+                rowlen = snprintf(row, sizeof(row), "\x1b[1m\x1b[32m%-25.20s\x1b[0m\t%s\t%5s\t%5.1lf%cB\t\t%.24s\t%s", f[file_row].get_file_name(), f[file_row].get_user(), f[file_row].get_group(), size,ch, f[file_row].get_last_modified().c_str(), f[file_row].get_permissions().c_str());
+
             if (rowlen > config.col - 20)
                 rowlen = config.col - 20;
             write(STDOUT_FILENO, row, rowlen);
@@ -435,7 +440,7 @@ void editorDraw(struct abuf *ab, vector<FileList> &f, bool *normal)
                 char banner[80];
                 const char *dir_f = dir.c_str();
                 int bannerlen = snprintf(banner, sizeof(banner),
-                                         "Normal Mode:%s", dir_f);
+                                         "\x1b[1m\x1b[33mNormal Mode:\x1b[1m\x1b[36m%s\x1b[0m", dir_f);
                 if (bannerlen > config.col)
                     bannerlen = config.col;
                 write(STDOUT_FILENO, banner, bannerlen);
@@ -447,7 +452,7 @@ void editorDraw(struct abuf *ab, vector<FileList> &f, bool *normal)
             {
                 char banner[80];
                 int bannerlen = snprintf(banner, sizeof(banner),
-                                         "$");
+                                         "\x1b[1m\x1b[31m$\x1b[0m");
                 if (bannerlen > config.col)
                     bannerlen = config.col;
                 write(STDOUT_FILENO, banner, bannerlen);
@@ -468,7 +473,7 @@ void refreshScreen(vector<FileList> &f, bool *normal)
 {
 
     struct abuf ab = ABUF_INIT;
-
+// \x1b[37mhhfhjg\x1b[0m
     abAppend(&ab, "\x1b[?25l", 6);
     //abAppend(&ab, "\x1b[2K", 4);
     abAppend(&ab, "\x1b[H", 3);
@@ -687,6 +692,7 @@ string handle_path(FileList f, string s)
     }
     return x;
 }
+
 void command_goto(vector<FileList> &f, vector<string> &l, int *index, bool *normal, string &s, char *buf, vector<string> tokens)
 {
     if (tokens.size() == 2)
@@ -701,22 +707,22 @@ void command_goto(vector<FileList> &f, vector<string> &l, int *index, bool *norm
                 l.erase(l.begin() + *index + 1, l.end());
             l.push_back(new_path);
             *index = *index + 1;
-            refresh_print_screen(buf, f, normal,path);
+            refresh_print_screen(buf, f, normal,"\x1b[1m\x1b[35m"+path+"\x1b[0m");
         }
         else if (ENOENT == errno)
         {
 
-            refresh_print_screen(buf, f, normal, "Directory does not exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mDirectory does not exist\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error while opening Directory");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError while opening Directory\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
     cmd_set_zero();
     move_cursor(buf, f, normal);
@@ -729,16 +735,16 @@ void command_search(vector<FileList> &f, vector<string> &l, bool *normal, string
         int found = search_dir(tokens[1], getenv("HOME"));
         if (found)
         {
-            refresh_print_screen(buf, f, normal, "True");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mTrue\x1b[0m");
         }
         else
         {
-            refresh_print_screen(buf, f, normal, "False");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mFalse\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
     cmd_set_zero();
     move_cursor(buf, f, normal);
@@ -757,36 +763,36 @@ void command_quit(char *key, vector<FileList> &f, vector<string> &l, bool *norma
 void command_create_dir(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
 {
     if (tokens.size() == 3)
-    {
-        DIR *dir = opendir(tokens[2].c_str());
+    {   
+        DIR *dir = opendir(handle_path(f[0],tokens[2]).c_str());
         if (dir)
         {
             /* Directory exists. */
-            string new_path = tokens[2] + "/" + tokens[1];
+            string new_path = handle_path(f[0],tokens[2]) + "/" + tokens[1];
             if (mkdir(new_path.c_str(), 0777) == -1)
             {
-                refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+                refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:Directory creation failed\x1b[0m");
             }
             else
             {
 
-                refresh_print_screen(buf, f, normal, "Directory Created Successfully");
+                refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mDirectory Created Successfully\x1b[0m");
             }
         }
         else if (ENOENT == errno)
         {
             /* Directory does not exist. */
-            refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mDirectory Does Not Exist\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:Directory Open failed\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
 
     cmd_set_zero();
@@ -796,35 +802,35 @@ void command_create_dir(vector<FileList> &f, vector<string> &l, bool *normal, st
 void command_create_file(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
 {
     if (tokens.size() == 3)
-    {
-        DIR *dir = opendir(tokens[2].c_str());
+    {   string path=handle_path(f[0],tokens[2]);
+        DIR *dir = opendir(path.c_str());
         if (dir)
         {
             /* Directory exists. */
-            std::ofstream(tokens[2] + "/" + tokens[1]);
-            f = print_dir(tokens[2]);
-            refresh_print_screen(buf, f, normal, "File Created Successfully");
+            std::ofstream(path + "/" + tokens[1]);
+            f = print_dir(path);
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mFile Created Successfully\x1b[0m");
         }
         else if (ENOENT == errno)
         {
             /* Directory does not exist. */
-            refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mDirectory Does Not Exist\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:Directory Open failed\x1b[0m");
         }
     }
     else if (tokens.size() == 2)
-    {
-        std::ofstream(f[0].get_dir_name() + "/" + tokens[1]);
+    {   
+        std::ofstream(handle_path(f[0],tokens[1]));
         f = print_dir(f[0].get_dir_name());
-        refresh_print_screen(buf, f, normal, "File Created Successfully");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mFile Created Successfully\x1b[0m");
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
     cmd_set_zero();
     move_cursor(buf, f, normal);
@@ -833,7 +839,7 @@ void command_create_file(vector<FileList> &f, vector<string> &l, bool *normal, s
 void command_rename(vector<FileList> &f, vector<string> &l, bool *normal, string &s, char *buf, vector<string> tokens)
 {
     if (tokens.size() == 3)
-    {
+    {   
         string full_path = handle_path(f[0],  tokens[1]);
         struct stat buffer;
         if ((stat(full_path.c_str(), &buffer) == 0))
@@ -843,20 +849,20 @@ void command_rename(vector<FileList> &f, vector<string> &l, bool *normal, string
             if (rename(full_path.c_str(), new_path.c_str()) == 0)
             {
                 f = print_dir(f[0].get_dir_name());
-                refresh_print_screen(buf, f, normal, "File Renamed Successfully");
+                refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mFile Renamed Successfully\x1b[0m");
             }
             else
-                refresh_print_screen(buf, f, normal, "Error while Renaming file");
+                refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError while Renaming file\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:File Does not Exist\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
     cmd_set_zero();
     move_cursor(buf, f, normal);
@@ -881,18 +887,18 @@ void command_delete_dir(vector<FileList> &f, vector<string> &l, bool *normal, st
                 v.pop();
             }
             if (!fault)
-                refresh_print_screen(buf, f, normal, "Directory Deleted Successfully");
+                refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mDirectory Deleted Successfully\x1b[0m");
             else
-                refresh_print_screen(buf, f, normal, "Error Occurred while removing Directory");
+                refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError Occurred while removing Directory\x1b[0m");
         }
         else
         {
-            refresh_print_screen(buf, f, normal, "Error Occurred while removing Directory");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError Occurred while removing Directory\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
 
     cmd_set_zero();
@@ -909,17 +915,17 @@ void command_delete_file(vector<FileList> &f, vector<string> &l, bool *normal, s
         if ((stat(src_path.c_str(), &buffer) == 0))
         {
             remove(src_path.c_str());
-            refresh_print_screen(buf, f, normal, "File Deleted Successfully");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[32mFile Deleted Successfully\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error:File Does not Exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:File Does not Exist\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
 
     cmd_set_zero();
@@ -930,7 +936,7 @@ void command_move(vector<FileList> &f, vector<string> &l, bool *normal, string &
 {
     if (tokens.size() >= 3)
     {
-        DIR *dir = opendir(tokens[tokens.size() - 1].c_str());
+        DIR *dir = opendir(handle_path(f[0],tokens[tokens.size() - 1]).c_str());
         if (dir)
         {
             string message;
@@ -943,27 +949,27 @@ void command_move(vector<FileList> &f, vector<string> &l, bool *normal, string &
                 {
 
                     /* Directory exists. */
-                    string dest_path = tokens[tokens.size() - 1] + "/" + tokens[i];
+                    string dest_path = handle_path(f[0],tokens[tokens.size() - 1]) + "/" + tokens[i];
                     if (rename(src_path.c_str(), dest_path.c_str()) == 0)
                     {
-                        message += tokens[i] + ":Directory Moved Successfully\t";
+                        message += "\x1b[1m\x1b[32m"+tokens[i] + ":Directory Moved Successfully\x1b[0m\t";
                     }
                     else
-                        message += tokens[i] + ":Error while Moving Directory\t";
+                        message += "\x1b[1m\x1b[31m"+tokens[i] + ":Error while Moving Directory\x1b[0m\t";
                 }
                 else
                 {
                     struct stat buffer;
                     if ((stat(src_path.c_str(), &buffer) == 0))
                     {
-                        string dest_path = tokens[tokens.size() - 1] + "/" + tokens[i];
+                    string dest_path = handle_path(f[0],tokens[tokens.size() - 1]) + "/" + tokens[i];
                         move_file(src_path, dest_path, buffer);
-                        message += tokens[i] + ":File Moved Successfully\t";
+                        message += "\x1b[1m\x1b[32m"+tokens[i] + ":File Moved Successfully\x1b[0m\t";
                     }
                     else
                     {
                         /* opendir() failed for some other reason. */
-                        message += tokens[i] + ":Error:File Does not Exist\t";
+                        message += "\x1b[1m\x1b[31m"+tokens[i] + ":Error:File Does not Exist\x1b[0m\t";
                     }
                 }
                 f = print_dir(f[0].get_dir_name());
@@ -973,17 +979,17 @@ void command_move(vector<FileList> &f, vector<string> &l, bool *normal, string &
         else if (ENOENT == errno)
         {
             /* Directory does not exist. */
-            refresh_print_screen(buf, f, normal, "Directory Does Not Exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mDirectory Does Not Exist\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:Directory Open failed\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
 
     cmd_set_zero();
@@ -1006,9 +1012,9 @@ void command_copy(vector<FileList> &f, vector<string> &l, bool *normal, string &
                 if (s_dir)
                 {
                     if(copy_dir(src_path, handle_path(f[0],tokens[tokens.size() - 1]) + "/" + tokens[i], tokens[tokens.size() - 1]))
-                        message += tokens[i] + ":Directory copied Successfully\t";
+                        message += "\x1b[1m\x1b[32m"+tokens[i] + ":Directory copied Successfully\x1b[0m\t";
                     else
-                        message += tokens[i] + ":Directory exist\t";
+                        message += "\x1b[1m\x1b[35m"+tokens[i] + ":Directory already exist\x1b[0m\t";
                 }
                 else
                 {
@@ -1017,12 +1023,12 @@ void command_copy(vector<FileList> &f, vector<string> &l, bool *normal, string &
                     {
                         string dest_path = handle_path(f[0],tokens[tokens.size() - 1]) + "/" + tokens[i];
                         copy_file(src_path, dest_path, buffer);
-                        message += tokens[i] + ":File copied Successfully\t";
+                        message += "\x1b[1m\x1b[32m"+tokens[i] + ":File copied Successfully\x1b[0m\t";
                     }
                     else
                     {
                         /* opendir() failed for some other reason. */
-                        message += tokens[i] + ":Error-File Does not Exist\t";
+                        message += "\x1b[1m\x1b[31m"+tokens[i] + ":Error-File Does not Exist\x1b[0m\t";
                     }
                 }
             }
@@ -1032,17 +1038,17 @@ void command_copy(vector<FileList> &f, vector<string> &l, bool *normal, string &
         else if (ENOENT == errno)
         {
             /* Directory does not exist. */
-            refresh_print_screen(buf, f, normal, "Detination Directory Does Not Exist");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mDetination Directory Does Not Exist\x1b[0m");
         }
         else
         {
             /* opendir() failed for some other reason. */
-            refresh_print_screen(buf, f, normal, "Error:Directory Open failed");
+            refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mError:Directory Open failed\x1b[0m");
         }
     }
     else
     {
-        refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
     }
 
     cmd_set_zero();
@@ -1100,7 +1106,7 @@ void command_mode(char *key, vector<FileList> &f, vector<string> &l, int *index,
                 }
                 else
                 {
-                    refresh_print_screen(buf, f, normal, "Not Valid Input");
+        refresh_print_screen(buf, f, normal, "\x1b[1m\x1b[31mNot Valid Input\x1b[0m");
                     cmd_set_zero();
                     move_cursor(buf, f, normal);
                     s.erase();
@@ -1372,11 +1378,11 @@ void editor()
     int newy, newx;
     while (true)
     {
-
+        write(STDOUT_FILENO, "\x1b[?7l", 5);
         char ch[3] = {'\0'};
         getWindowSize(&newy, &newx);
         if (newy != config.row || newx != config.col)
-        {
+        {   
             f = print_dir(f[0].get_dir_name());
             config.row = newy;
             config.col = newx;
